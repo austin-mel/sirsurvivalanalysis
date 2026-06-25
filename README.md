@@ -35,21 +35,21 @@ rights.
 Then run the full simulation and render both reports:
 
 ```powershell
-Rscript analysis/survival_baseline/run_all.R
+Rscript /run_all.R
 ```
 
 If `Rscript` is not on your terminal `PATH`, open RStudio or an R console at the
 project root and run:
 
 ```r
-source("analysis/survival_baseline/setup/install_packages.R")
-source("analysis/survival_baseline/run_all.R")
+source("/setup/install_packages.R")
+source("/run_all.R")
 ```
 
 On this Windows machine, an explicit Rscript path may also work:
 
 ```powershell
-& "C:\Program Files\R\R-4.5.1\bin\Rscript.exe" analysis/survival_baseline/run_all.R
+& "C:\Program Files\R\R-4.5.1\bin\Rscript.exe" /run_all.R
 ```
 
 The runner auto-detects the RStudio-bundled Pandoc path used for rendering
