@@ -25,31 +25,31 @@ observed step.
 From the project root, install or check the analysis packages:
 
 ```powershell
-Rscript analysis/survival_baseline/setup/install_packages.R
+Rscript /survival_baseline/setup/install_packages.R
 ```
 
 The setup script installs required analysis packages into the project-local
-library `analysis/survival_baseline/.r_libs` so the setup does not require admin
+library `/survival_baseline/.r_libs` so the setup does not require admin
 rights.
 
 Then run the full simulation and render both reports:
 
 ```powershell
-Rscript /run_all.R
+Rscript /survival_baseline/run_all.R
 ```
 
 If `Rscript` is not on your terminal `PATH`, open RStudio or an R console at the
 project root and run:
 
 ```r
-source("/setup/install_packages.R")
-source("/run_all.R")
+source("/survival_baseline/setup/install_packages.R")
+source("/survival_baseline/run_all.R")
 ```
 
 On this Windows machine, an explicit Rscript path may also work:
 
 ```powershell
-& "C:\Program Files\R\R-4.5.1\bin\Rscript.exe" /run_all.R
+& "C:\Program Files\R\R-4.5.1\bin\Rscript.exe" /survival_baseline/run_all.R
 ```
 
 The runner auto-detects the RStudio-bundled Pandoc path used for rendering
