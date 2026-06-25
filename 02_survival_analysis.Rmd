@@ -1,0 +1,199 @@
+---
+title: "Baseline SIRS Survival Analysis"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, mustWork = TRUE)
+  while (!file.exists(file.path(current, "DESCRIPTION")) || !dir.exists(file.path(current, "R"))) {
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      stop("Could not locate the SIRSsim project root.", call. = FALSE)
+    }
+    current <- parent
+  }
+  current
+}
+project_root <- find_project_root()
+knitr::opts_knit$set(root.dir = project_root)
+library(survival)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(ggplot2)
+library(broom)
+
+analysis_dir <- file.path(project_root, "analysis", "survival_baseline")
+output_dir <- file.path(analysis_dir, "outputs")
+derived_dir <- file.path(output_dir, "derived")
+figure_dir <- file.path(output_dir, "figures")
+
+embed_png <- function(path, alt) {
+  sprintf("![%s](%s)", alt, knitr::image_uri(normalizePath(path, mustWork = TRUE)))
+}
+```
+
+## Purpose
+
+This report treats each matrix cell as a subject and analyzes three endpoints:
+first infection, first recovery, and death. Cells without a given event are
+censored at the final observed simulation step.
+
+The event columns follow the standard `R` survival convention used by
+`Surv(time, status)`: `TRUE` means the event was observed, and `FALSE` means the
+cell was censored for that endpoint.
+
+```{r load-endpoints}
+survival_endpoints <- read_csv(file.path(derived_dir, "survival_endpoints.csv"), show_col_types = FALSE)
+
+survival_endpoints <- survival_endpoints %>%
+  mutate(
+    initially_infected = as.logical(initially_infected),
+    event_infection = as.logical(event_infection),
+    event_recovery = as.logical(event_recovery),
+    event_death = as.logical(event_death)
+  )
+
+head(survival_endpoints)
+```
+
+## Event Summary
+
+```{r event-summary}
+event_summary <- data.frame(
+  endpoint = c("First infection", "Recovery", "Death"),
+  events = c(
+    sum(survival_endpoints$event_infection),
+    sum(survival_endpoints$event_recovery),
+    sum(survival_endpoints$event_death)
+  ),
+  censored = c(
+    sum(!survival_endpoints$event_infection),
+    sum(!survival_endpoints$event_recovery),
+    sum(!survival_endpoints$event_death)
+  ),
+  median_time = c(
+    median(survival_endpoints$time_to_infection),
+    median(survival_endpoints$time_to_recovery),
+    median(survival_endpoints$time_to_death)
+  )
+)
+
+event_summary
+```
+
+## Kaplan-Meier Curves
+
+```{r km-infection, echo=FALSE, results='asis'}
+cat(embed_png(file.path(figure_dir, "km_infection.png"), "Kaplan-Meier infection curve"))
+```
+
+```{r km-recovery, echo=FALSE, results='asis'}
+cat(embed_png(file.path(figure_dir, "km_recovery.png"), "Kaplan-Meier recovery curve"))
+```
+
+```{r km-death, echo=FALSE, results='asis'}
+cat(embed_png(file.path(figure_dir, "km_death.png"), "Kaplan-Meier death curve"))
+```
+
+## Stratified Kaplan-Meier Curves
+
+Following the reference lab workflow, the infection endpoint is stratified by
+whether the cell was infected at step `0`, and the death endpoint is stratified
+by distance from the center seed.
+
+```{r stratified-km-infection, echo=FALSE, results='asis'}
+cat(embed_png(file.path(figure_dir, "km_infection_initial_status.png"), "Stratified infection curve"))
+```
+
+```{r stratified-km-death, echo=FALSE, results='asis'}
+cat(embed_png(file.path(figure_dir, "km_death_distance_group.png"), "Stratified death curve"))
+```
+
+## Kaplan-Meier Tables
+
+```{r km-tables}
+infection_fit <- survfit(Surv(time_to_infection, event_infection) ~ 1, data = survival_endpoints)
+recovery_fit <- survfit(Surv(time_to_recovery, event_recovery) ~ 1, data = survival_endpoints)
+death_fit <- survfit(Surv(time_to_death, event_death) ~ 1, data = survival_endpoints)
+
+list(
+  infection = summary(infection_fit)$table,
+  recovery = summary(recovery_fit)$table,
+  death = summary(death_fit)$table
+)
+```
+
+## Log-Rank Tests
+
+Log-rank tests compare survival curves across the same strata used above.
+
+```{r log-rank-tests}
+infection_logrank <- survdiff(Surv(time_to_infection, event_infection) ~ initially_infected, data = survival_endpoints)
+death_logrank <- survdiff(Surv(time_to_death, event_death) ~ distance_group, data = survival_endpoints)
+
+list(
+  infection_by_initial_status = infection_logrank,
+  death_by_distance_group = death_logrank
+)
+```
+
+## Cox Models
+
+The models use row, column, distance from center, and initial infection status as
+cell-level covariates. Coefficients are descriptive for this single simulated
+run and should not be generalized beyond this baseline scenario.
+
+```{r cox-helper}
+fit_cox <- function(time_column, event_column) {
+  event_count <- sum(survival_endpoints[[event_column]])
+  if (event_count < 2) {
+    return(data.frame(
+      term = "not_fit",
+      estimate = NA_real_,
+      conf.low = NA_real_,
+      conf.high = NA_real_,
+      p.value = NA_real_,
+      note = paste("Only", event_count, "event(s); Cox model not fit.")
+    ))
+  }
+
+  formula <- as.formula(
+    paste0("Surv(", time_column, ", ", event_column, ") ~ row + col + distance_from_center + initially_infected")
+  )
+
+  broom::tidy(coxph(formula, data = survival_endpoints), exponentiate = TRUE, conf.int = TRUE) %>%
+    mutate(note = "Hazard ratio")
+}
+```
+
+```{r cox-results}
+cox_results <- bind_rows(
+  fit_cox("time_to_infection", "event_infection") %>% mutate(endpoint = "First infection"),
+  fit_cox("time_to_recovery", "event_recovery") %>% mutate(endpoint = "Recovery"),
+  fit_cox("time_to_death", "event_death") %>% mutate(endpoint = "Death")
+) %>%
+  select(endpoint, term, estimate, conf.low, conf.high, p.value, note)
+
+cox_results
+```
+
+## Interpretation
+
+```{r interpretation}
+interpretation <- data.frame(
+  finding = c(
+    "Cells are censored independently for each endpoint.",
+    "Initially infected cells have infection time zero.",
+    "Death is only possible because mortality is enabled in the baseline run.",
+    "Cox model estimates are descriptive because this report analyzes one simulated baseline run."
+  )
+)
+
+interpretation
+```

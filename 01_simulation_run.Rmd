@@ -1,0 +1,133 @@
+---
+title: "Baseline SIRS Simulation Run"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, mustWork = TRUE)
+  while (!file.exists(file.path(current, "DESCRIPTION")) || !dir.exists(file.path(current, "R"))) {
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      stop("Could not locate the SIRSsim project root.", call. = FALSE)
+    }
+    current <- parent
+  }
+  current
+}
+project_root <- find_project_root()
+knitr::opts_knit$set(root.dir = project_root)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+analysis_dir <- file.path(project_root, "analysis", "survival_baseline")
+output_dir <- file.path(analysis_dir, "outputs")
+raw_dir <- file.path(output_dir, "raw")
+derived_dir <- file.path(output_dir, "derived")
+figure_dir <- file.path(output_dir, "figures")
+
+embed_png <- function(path, alt) {
+  sprintf("![%s](%s)", alt, knitr::image_uri(normalizePath(path, mustWork = TRUE)))
+}
+```
+
+## Purpose
+
+This report documents the exact baseline SIRS simulation used for the survival
+analysis. The simulation uses a `10 x 10` matrix with the center cell initially
+infected, SIRS transitions, and mortality enabled.
+
+## Parameters
+
+```{r parameters}
+parameters <- data.frame(
+  parameter = c(
+    "rows",
+    "columns",
+    "initial_infection",
+    "model",
+    "prob_infect",
+    "imm_prob",
+    "allow_death",
+    "fat_prob",
+    "seed",
+    "full_log"
+  ),
+  value = c("10", "10", "center seeded", "SIRS", "0.25", "0.70", "TRUE", "0.15", "94128", "TRUE")
+)
+
+parameters
+```
+
+## Raw Outputs
+
+```{r load-outputs}
+full_log <- read_csv(file.path(raw_dir, "full_log.csv"), show_col_types = FALSE)
+history <- read_csv(file.path(raw_dir, "history.csv"), show_col_types = FALSE)
+final_matrix <- read_csv(file.path(raw_dir, "final_matrix.csv"), show_col_types = FALSE)
+survival_endpoints <- read_csv(file.path(derived_dir, "survival_endpoints.csv"), show_col_types = FALSE)
+
+list(
+  full_log_rows = nrow(full_log),
+  full_log_columns = names(full_log),
+  simulation_steps = max(history$step),
+  endpoint_rows = nrow(survival_endpoints)
+)
+```
+
+## Simulation History
+
+```{r history-table}
+history
+```
+
+```{r history-plot, echo=FALSE, results='asis'}
+cat(embed_png(file.path(figure_dir, "simulation_history.png"), "Simulation history"))
+```
+
+## Final Matrix
+
+```{r final-matrix-table}
+final_matrix
+```
+
+```{r final-matrix-plot, echo=FALSE, results='asis'}
+cat(embed_png(file.path(figure_dir, "final_matrix.png"), "Final matrix state"))
+```
+
+## Full Log Structure
+
+The full log contains one row per cell per step, including step `0` before any
+state transitions.
+
+```{r full-log-preview}
+head(full_log, 12)
+```
+
+```{r full-log-validation}
+expected_rows <- 100 * (max(history$step) + 1)
+validation <- data.frame(
+  check = c(
+    "full_log contains expected rows",
+    "survival_endpoints has one row per cell",
+    "event indicators are logical"
+  ),
+  passed = c(
+    nrow(full_log) == expected_rows,
+    nrow(survival_endpoints) == 100 && length(unique(survival_endpoints$cell_id)) == 100,
+    all(vapply(survival_endpoints[c("event_infection", "event_recovery", "event_death")], is.logical, logical(1)))
+  )
+)
+
+validation
+```
+
+The survival reports use the standard `R` survival convention shown in
+`Surv(time, status)`: event indicators are `TRUE` for observed events and
+`FALSE` for censored observations.
