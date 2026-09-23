@@ -1,6 +1,24 @@
 # Baseline SIRS Survival Analysis
 
-## Project Title And Short Summary
+## Table of Contents
+
+- [Project Summary](#project-summary)
+- [Executive Summary](#executive-summary)
+- [Getting Started & Replication](#getting-started--replication)
+  - [1. Install Prerequisites](#1-install-prerequisites)
+  - [2. Clone the Repositories](#2-clone-the-repositories)
+  - [3. Prepare the Report Folder](#3-prepare-the-report-folder)
+  - [4. Install R Dependencies](#4-install-r-dependencies)
+  - [5. Run the Analysis](#5-run-the-analysis)
+  - [6. Verify the Results](#6-verify-the-results)
+- [Further Details](#further-details)
+  - [Simulation Settings](#simulation-settings)
+  - [Endpoint Timing](#endpoint-timing)
+  - [Report Findings](#report-findings)
+  - [Survival Term Definitions](#survival-term-definitions)
+  - [Limitations](#limitations)
+
+## Project Summary
 
 This project tracks first infection, first recovery, and death across 100
 simulated cells on a `10 x 10` grid. It reports one baseline run. SIRS stands
@@ -29,49 +47,156 @@ because one cell can experience more than one type of event.
 
 ## Getting Started & Replication
 
-**Replication blockers:** The current checkout cannot complete the full
-workflow without changes to its path and simulator setup.
+The analysis depends on the `SIRSsim` R package from
+[sirmodelsimulation](https://github.com/austin-mel/sirmodelsimulation).
+See its [installation instructions](https://github.com/austin-mel/sirmodelsimulation#installation)
+for package setup. The steps below use a compatible simulator revision and
+the folder layout that the current analysis scripts require.
 
-- The scripts use `analysis/survival_baseline`. The runner expects report
-  sources in `analysis/survival_baseline/reports`, but both `.Rmd` files sit at
-  the repository root.
-- Both `.Rmd` files search for a simulator package root containing
-  `DESCRIPTION` and `R/`. This checkout contains neither.
-- The runner selects `pkgload::load_all(".")` whenever `pkgload` is available.
-  If that call fails, execution stops. Only when `pkgload` is unavailable does
-  the runner try installed `SIRSsim`, then local `R/` sources.
+### 1. Install Prerequisites
 
-Installing `SIRSsim` alone does not resolve these blockers. The runner needs
-its `create_cntr_matrix()` and `simulate_sir()` functions. This checkout does
-not supply the simulator source or a package installer.
+Install R, Git, and Pandoc. RStudio can supply Pandoc for report rendering.
+Use a terminal for the Git commands and an R console for the R commands.
+These instructions use forward slashes and work across Windows, macOS, and
+Linux.
 
-**Requirements:** R, the `SIRSsim` dependency, and Pandoc for HTML rendering.
-The [package setup script](setup/install_packages.R) installs `survival`,
-`dplyr`, `tidyr`, `readr`, `ggplot2`, `broom`, `rmarkdown`, `knitr`, and their
-required CRAN dependencies into `analysis/survival_baseline/.r_libs`. It does
-not install `SIRSsim` or Pandoc.
+### 2. Clone the Repositories
 
-From the repository root, install the R packages with:
+Start in a new working folder. Clone the simulator, select the compatible
+revision, and clone this analysis into its expected location:
 
 ```sh
-Rscript setup/install_packages.R
+git clone https://github.com/austin-mel/sirmodelsimulation.git
+cd sirmodelsimulation
+git checkout --detach 43bf4b88ac1d54fd298bf24d41c1ac56b58118d2
+git clone https://github.com/austin-mel/sirsurvivalanalysis.git analysis/survival_baseline
 ```
 
-After resolving the replication blockers, run the analysis from the same
-directory:
+Revision `43bf4b8` provides `create_cntr_matrix()` and `full_log`, which
+`run_all.R` requires. Later simulator revisions rename the matrix helper to
+`create_center_matrix()`. Keep the pinned revision for this workflow.
 
-```sh
-Rscript run_all.R
-```
+Open `SIRSsim.Rproj` from the simulator folder in RStudio, or start R from
+that folder. Keep this working directory and R session for steps 3 through 6.
+All paths below start at the **simulator repository root**, which contains
+`DESCRIPTION` and `R/`.
 
-These commands work in PowerShell and other shells when `Rscript` is on
-`PATH`. Alternatively, use an R console with the repository root as its
-working directory. The same replication blockers apply:
+### 3. Prepare the Report Folder
+
+The runner reads report templates from `analysis/survival_baseline/reports`.
+Copy the two templates there from the analysis root:
 
 ```r
-source("setup/install_packages.R")
-source("run_all.R")
+stopifnot(
+  file.exists("DESCRIPTION"),
+  dir.exists("R"),
+  file.exists("analysis/survival_baseline/run_all.R")
+)
+
+report_dir <- "analysis/survival_baseline/reports"
+dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
+report_sources <- file.path(
+  "analysis/survival_baseline",
+  c("01_simulation_run.Rmd", "02_survival_analysis.Rmd")
+)
+stopifnot(all(file.copy(report_sources, report_dir, overwrite = TRUE)))
 ```
+
+Repeat this copy after editing either original `.Rmd` file. It replaces the
+copies that the runner renders.
+
+### 4. Install R Dependencies
+
+Run the [package setup script](setup/install_packages.R). It installs
+`survival`, `dplyr`, `tidyr`, `readr`, `ggplot2`, `broom`, `rmarkdown`, `knitr`,
+and their required dependencies into `analysis/survival_baseline/.r_libs`.
+Then install `SIRSsim` from the pinned local clone using the simulator's
+documented local installation method:
+
+```r
+source("analysis/survival_baseline/setup/install_packages.R")
+install.packages(
+  "remotes",
+  repos = "https://cloud.r-project.org",
+  lib = .libPaths()[1]
+)
+remotes::install_local(
+  ".",
+  lib = .libPaths()[1],
+  dependencies = NA,
+  upgrade = "never",
+  build = FALSE
+)
+
+library(SIRSsim)
+stopifnot(
+  is.function(create_cntr_matrix),
+  "full_log" %in% names(formals(simulate_sir))
+)
+stopifnot(rmarkdown::pandoc_available())
+```
+
+The [local installer](https://remotes.r-lib.org/reference/install_local.html)
+uses `build = FALSE` to skip archiving the simulator folder, which now also
+contains the analysis and its package library.
+
+If the Pandoc check fails, open the project in RStudio or install Pandoc and
+add it to `PATH`, then restart R. The
+[Pandoc availability check](https://rmarkdown.rstudio.com/docs/reference/pandoc_available.html)
+looks for both the RStudio copy and executables on `PATH`.
+
+### 5. Run the Analysis
+
+From the simulator root, run:
+
+```r
+source("analysis/survival_baseline/run_all.R")
+```
+
+The runner uses seed `94128` and the settings in [Simulation Settings](#simulation-settings).
+It generates data, figures, and both HTML reports under
+`analysis/survival_baseline/outputs`. It also records the R session and package
+versions in `session_info.txt` in that folder. Rerunning replaces these outputs.
+
+The simulator root matters: the runner loads local source through `pkgload`
+when available, otherwise it tries installed `SIRSsim`, then local `R/` files.
+Both reports also locate the simulator root through `DESCRIPTION` and `R/`.
+
+### 6. Verify the Results
+
+Run these checks in the same R session:
+
+```r
+output_dir <- "analysis/survival_baseline/outputs"
+endpoints <- read.csv(file.path(output_dir, "derived", "survival_endpoints.csv"))
+history <- read.csv(file.path(output_dir, "raw", "history.csv"))
+full_log <- read.csv(file.path(output_dir, "raw", "full_log.csv"))
+event_counts <- colSums(endpoints[c("event_infection", "event_recovery", "event_death")])
+
+stopifnot(
+  nrow(endpoints) == 100,
+  length(unique(endpoints$cell_id)) == 100,
+  nrow(full_log) == 1000,
+  max(history$step) == 9,
+  tail(history$infected, 1) == 0,
+  all(event_counts == c(20, 13, 4)),
+  all(file.exists(file.path(
+    output_dir,
+    c("01_simulation_run.html", "02_survival_analysis.html", "session_info.txt")
+  )))
+)
+event_counts
+```
+
+The checks compare your run with the committed reports: 100 cells, 1,000 log
+rows, 9 steps, 20 first infections, 13 recoveries, and 4 deaths. If a check
+fails, confirm the simulator revision, working directory, and simulation
+settings before interpreting the results.
+
+Open `01_simulation_run.html` and `02_survival_analysis.html` from the new
+`outputs` folder in a browser. CRAN packages are not version-locked, so report
+formatting and model output can vary with dependency versions. Use the
+numerical checks and `session_info.txt` when comparing runs.
 
 ## Further Details
 
